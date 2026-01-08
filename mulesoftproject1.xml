@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns:jms="http://www.mulesoft.org/schema/mule/jms"
+      xmlns:db="http://www.mulesoft.org/schema/mule/db"
+      xmlns:validation="http://www.mulesoft.org/schema/mule/validation"
+      xmlns:dw="http://www.mulesoft.org/schema/mule/ee/dw"
+      xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+      xmlns:http="http://www.mulesoft.org/schema/mule/http"
+      xmlns="http://www.mulesoft.org/schema/mule/core"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+http://www.mulesoft.org/schema/mule/ee/dw http://www.mulesoft.org/schema/mule/ee/dw/current/dw.xsd
+http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mule/validation/current/mule-validation.xsd
+http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
+http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
+
+    <!-- CONFIGS -->
+
+    <http:listener-config name="HTTP_Listener_config">
+        <http:listener-connection host="0.0.0.0" port="8081"/>
+    </http:listener-config>
+
+    <db:config name="Database_Config">
+        <db:my-sql-connection host="localhost" port="3306"
+                              user="root" password="admin"
+                              database="mulesoft_crud_db"/>
+    </db:config>
+
+    <jms:config name="JMS_Config">
+        <jms:active-mq-connection username="admin" password="admin">
+            <jms:factory-configuration brokerUrl="tcp://localhost:61616"/>
+        </jms:active-mq-connection>
+    </jms:config>
+
+    <!-- MAIN HTTP FLOW -->
+
+    <flow name="employee-api-flow">
+        <http:listener config-ref="HTTP_Listener_config"
+                       path="/employee"
+                       allowedMethods="GET,POST,PUT,DELETE"/>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+{
+  method: attributes.method,
+  emp_id:
+    if (attributes.queryParams.emp_id != null)
+      attributes.queryParams.emp_id as Number
+    else
+      null,
+  body: payload
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <choice>
+            <when expression='#[payload.method == "POST"]'>
+                <flow-ref name="create-subflow"/>
+            </when>
+            <when expression='#[payload.method == "GET"]'>
+                <flow-ref name="read-subflow"/>
+            </when>
+            <when expression='#[payload.method == "PUT"]'>
+                <flow-ref name="update-subflow"/>
+            </when>
+            <when expression='#[payload.method == "DELETE"]'>
+                <flow-ref name="delete-subflow"/>
+            </when>
+        </choice>
+    </flow>
+
+    <!-- CREATE -->
+
+    <sub-flow name="create-subflow">
+        <validation:is-not-null value="#[payload.body.emp_name]"/>
+        <validation:is-not-null value="#[payload.body.emp_email]"/>
+        <validation:is-true expression="#[payload.body.emp_salary > 0]"/>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+{
+  id: null,
+  name: payload.body.emp_name,
+  email: payload.body.emp_email,
+  salary: payload.body.emp_salary
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <jms:publish destination="employeeQueue" config-ref="JMS_Config"/>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+  success: true,
+  message: "Employee create request queued"
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- READ -->
+
+    <sub-flow name="read-subflow">
+        <validation:is-not-null value="#[payload.emp_id]"
+                                message="Employee id is required"/>
+
+        <!-- 🔴 REQUIRED TRANSFORM (DB PARAM BINDING) -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+{
+  id: payload.emp_id
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <db:select config-ref="Database_Config">
+            <db:sql><![CDATA[
+SELECT emp_id, emp_name, emp_email, emp_salary
+FROM employee
+WHERE emp_id = :id
+]]></db:sql>
+            <db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+        </db:select>
+
+        <!-- RESPONSE -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+  success: true,
+  count: sizeOf(payload),
+  data: payload
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- UPDATE -->
+
+    <sub-flow name="update-subflow">
+        <validation:is-not-null value="#[payload.emp_id]"/>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+{
+  id: payload.emp_id,
+  name: payload.body.emp_name,
+  email: payload.body.emp_email,
+  salary: payload.body.emp_salary
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <jms:publish destination="employeeQueue" config-ref="JMS_Config"/>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+  success: true,
+  message: "Employee update request queued"
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- DELETE -->
+
+    <sub-flow name="delete-subflow">
+        <validation:is-not-null value="#[payload.emp_id]"/>
+
+        <!-- 🔴 REQUIRED TRANSFORM (DB PARAM BINDING) -->
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/java
+---
+{
+  id: payload.emp_id
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+
+        <db:delete config-ref="Database_Config">
+            <db:sql><![CDATA[
+DELETE FROM employee WHERE emp_id = :id
+]]></db:sql>
+            <db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+        </db:delete>
+
+        <ee:transform>
+            <ee:message>
+                <ee:set-payload><![CDATA[
+%dw 2.0
+output application/json
+---
+{
+  success: true,
+  message: "Employee deleted successfully"
+}
+]]></ee:set-payload>
+            </ee:message>
+        </ee:transform>
+    </sub-flow>
+
+    <!-- QUEUE CONSUMER -->
+
+    <flow name="employee-queue-consumer-flow">
+        <jms:listener destination="employeeQueue" config-ref="JMS_Config"/>
+
+        <choice>
+            <when expression="#[payload.id == null]">
+                <db:insert config-ref="Database_Config">
+                    <db:sql><![CDATA[
+INSERT INTO employee (emp_name, emp_email, emp_salary)
+VALUES (:name, :email, :salary)
+]]></db:sql>
+                    <db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+                </db:insert>
+            </when>
+
+            <when expression="#[payload.id != null]">
+                <db:update config-ref="Database_Config">
+                    <db:sql><![CDATA[
+UPDATE employee
+SET emp_name = :name,
+    emp_email = :email,
+    emp_salary = :salary
+WHERE emp_id = :id
+]]></db:sql>
+                    <db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
+                </db:update>
+            </when>
+        </choice>
+    </flow>
+
+</mule>

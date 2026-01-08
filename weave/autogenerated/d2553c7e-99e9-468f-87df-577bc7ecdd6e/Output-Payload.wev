@@ -1,0 +1,8 @@
+%dw 2.0
+
+type auto_d2553c7e_99e9_468f_87df_577bc7ecdd6e_Output_Payload = {|
+  method: String, 
+  emp_id: Number, 
+  body: Any
+|}
+
