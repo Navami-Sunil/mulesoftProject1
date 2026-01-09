@@ -17,7 +17,6 @@ http://www.mulesoft.org/schema/mule/validation http://www.mulesoft.org/schema/mu
 http://www.mulesoft.org/schema/mule/db http://www.mulesoft.org/schema/mule/db/current/mule-db.xsd
 http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/current/mule-jms.xsd">
 
-    <!-- CONFIGS -->
 
     <http:listener-config name="HTTP_Listener_config">
         <http:listener-connection host="0.0.0.0" port="8081"/>
@@ -35,7 +34,6 @@ http://www.mulesoft.org/schema/mule/jms http://www.mulesoft.org/schema/mule/jms/
         </jms:active-mq-connection>
     </jms:config>
 
-    <!-- MAIN HTTP FLOW -->
 
     <flow name="employee-api-flow">
         <http:listener config-ref="HTTP_Listener_config"
@@ -77,7 +75,6 @@ output application/java
         </choice>
     </flow>
 
-    <!-- CREATE -->
 
     <sub-flow name="create-subflow">
         <validation:is-not-null value="#[payload.body.emp_name]"/>
@@ -117,13 +114,11 @@ output application/json
         </ee:transform>
     </sub-flow>
 
-    <!-- READ -->
 
     <sub-flow name="read-subflow">
         <validation:is-not-null value="#[payload.emp_id]"
                                 message="Employee id is required"/>
 
-        <!-- 🔴 REQUIRED TRANSFORM (DB PARAM BINDING) -->
         <ee:transform>
             <ee:message>
                 <ee:set-payload><![CDATA[
@@ -146,7 +141,6 @@ WHERE emp_id = :id
             <db:input-parameters><![CDATA[#[payload]]]></db:input-parameters>
         </db:select>
 
-        <!-- RESPONSE -->
         <ee:transform>
             <ee:message>
                 <ee:set-payload><![CDATA[
@@ -163,7 +157,6 @@ output application/json
         </ee:transform>
     </sub-flow>
 
-    <!-- UPDATE -->
 
     <sub-flow name="update-subflow">
         <validation:is-not-null value="#[payload.emp_id]"/>
@@ -201,12 +194,10 @@ output application/json
         </ee:transform>
     </sub-flow>
 
-    <!-- DELETE -->
 
     <sub-flow name="delete-subflow">
         <validation:is-not-null value="#[payload.emp_id]"/>
 
-        <!-- 🔴 REQUIRED TRANSFORM (DB PARAM BINDING) -->
         <ee:transform>
             <ee:message>
                 <ee:set-payload><![CDATA[
@@ -242,7 +233,6 @@ output application/json
         </ee:transform>
     </sub-flow>
 
-    <!-- QUEUE CONSUMER -->
 
     <flow name="employee-queue-consumer-flow">
         <jms:listener destination="employeeQueue" config-ref="JMS_Config"/>
