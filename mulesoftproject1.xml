@@ -161,7 +161,6 @@ output application/json
         </ee:transform>
     </sub-flow>
 
-    <!-- UPDATE -->
 
     <sub-flow name="update-subflow">
         <validation:is-not-null value="#[payload.emp_id]"/>
